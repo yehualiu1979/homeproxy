@@ -1,0 +1,41 @@
+name: Sync Upstream and Clean
+
+on:
+  schedule:
+    - cron: '0 22 * * 2'  # 每周三北京时间早上6点（UTC周二22:00）
+  workflow_dispatch:  # 支持手动触发
+
+permissions: write-all
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Sync upstream changes
+        uses: aormsby/fork-sync-with-upstream-action@v3.4
+        with:
+          upstream_sync_repo: immortalwrt/homeproxy   #更改用户名和仓库名可同步
+          upstream_sync_branch: master
+          target_sync_branch: master
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
+
+  clean-workflows:
+    runs-on: ubuntu-22.04
+    needs: sync  # 等待同步任务成功完成后再清理
+    if: success()  # 仅当同步成功时执行清理
+    steps:
+      - name: Delete all workflow run histories
+        uses: ophub/delete-releases-workflows@main
+        with:
+          gh_token: ${{ secrets.GITHUB_TOKEN }}
+          delete_releases: false
+          delete_tags: false
+          delete_workflows: true
+          workflows_keep_day: 0
