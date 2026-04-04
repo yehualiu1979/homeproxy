@@ -18,6 +18,16 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      - name: Save custom files to artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-files-backup
+          path: |
+            .github/workflows/Upstream&Clean.yml
+            .github/workflows/test-clash-api-scripts.yml
+            scripts/clash-api/
+          if-no-files-found: warn
+
       - name: Sync upstream changes
         uses: aormsby/fork-sync-with-upstream-action@v3.4
         with:
@@ -26,10 +36,55 @@ jobs:
           target_sync_branch: master
           target_repo_token: ${{ secrets.GITHUB_TOKEN }}
 
+  restore-custom-files:
+    runs-on: ubuntu-latest
+    needs: sync
+    if: success()
+    steps:
+      - name: Checkout code after sync
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download custom files
+        uses: actions/download-artifact@v4
+        with:
+          name: custom-files-backup
+          path: /tmp/restore/
+
+      - name: Restore custom files
+        run: |
+          mkdir -p .github/workflows
+          cp /tmp/restore/.github/workflows/Upstream&Clean.yml .github/workflows/ 2>/dev/null || echo "Upstream&Clean.yml 不存在"
+          cp /tmp/restore/.github/workflows/test-clash-api-scripts.yml .github/workflows/ 2>/dev/null || echo "test-clash-api-scripts.yml 不存在"
+          cp -r /tmp/restore/scripts/clash-api/ scripts/ 2>/dev/null || echo "scripts/clash-api/ 不存在"
+          echo "恢复完成"
+          ls -la .github/workflows/
+
+      - name: Commit and push restored files
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          git add .github/workflows/Upstream&Clean.yml .github/workflows/test-clash-api-scripts.yml scripts/clash-api/ || true
+          
+          if git diff --cached --quiet; then
+            echo "没有文件需要恢复"
+          else
+            git commit -m "chore: 恢复自定义 workflow 和脚本
+
+            - 恢复 Upstream&Clean.yml
+            - 恢复 test-clash-api-scripts.yml  
+            - 恢复 scripts/clash-api/ 目录
+            "
+            git push origin master
+          fi
+
   clean-workflows:
     runs-on: ubuntu-22.04
-    needs: sync  # 等待同步任务成功完成后再清理
-    if: success()  # 仅当同步成功时执行清理
+    needs: restore-custom-files  # 等待恢复任务完成后再清理
+    if: success()  # 仅当恢复成功时执行清理
     steps:
       - name: Delete all workflow run histories
         uses: ophub/delete-releases-workflows@main
