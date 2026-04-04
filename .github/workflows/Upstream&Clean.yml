@@ -2,7 +2,7 @@ name: Sync Upstream and Clean
 
 on:
   schedule:
-    - cron: '0 22 * * 2'  # 每周三北京时间早上6点（UTC周二22:00）
+    - cron: '0 20 * * 2'  # 每周三北京时间早上4点（UTC周二20:00）
   workflow_dispatch:  # 支持手动触发
 
 permissions: write-all
