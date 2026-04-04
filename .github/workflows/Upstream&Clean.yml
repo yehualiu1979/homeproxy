@@ -10,6 +10,8 @@ permissions: write-all
 jobs:
   sync:
     runs-on: ubuntu-latest
+    outputs:
+      commit_hash: ${{ steps.get_hash.outputs.commit_hash }}
     steps:
       - name: Checkout target repository
         uses: actions/checkout@v4
@@ -18,15 +20,13 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Save custom files to artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: custom-files-backup
-          path: |
-            .github/workflows/Upstream&Clean.yml
-            .github/workflows/test-clash-api-scripts.yml
-            scripts/clash-api/
-          if-no-files-found: warn
+      - name: Get commit hash before sync
+        id: get_hash
+        run: |
+          # 获取 master 分支的最新 commit hash
+          COMMIT_HASH=$(git rev-parse HEAD)
+          echo "commit_hash=${COMMIT_HASH}" >> $GITHUB_OUTPUT
+          echo "同步前的 commit: ${COMMIT_HASH}"
 
       - name: Sync upstream changes
         uses: aormsby/fork-sync-with-upstream-action@v3.4
@@ -46,19 +46,25 @@ jobs:
         with:
           ref: master
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
-      - name: Download custom files
-        uses: actions/download-artifact@v4
-        with:
-          name: custom-files-backup
-          path: /tmp/restore/
-
-      - name: Restore custom files
+      - name: Restore custom files from git history
         run: |
-          mkdir -p .github/workflows
-          cp /tmp/restore/.github/workflows/Upstream&Clean.yml .github/workflows/ 2>/dev/null || echo "Upstream&Clean.yml 不存在"
-          cp /tmp/restore/.github/workflows/test-clash-api-scripts.yml .github/workflows/ 2>/dev/null || echo "test-clash-api-scripts.yml 不存在"
-          cp -r /tmp/restore/scripts/clash-api/ scripts/ 2>/dev/null || echo "scripts/clash-api/ 不存在"
+          # 从上一次提交中恢复自定义文件
+          COMMIT_HASH="${{ needs.sync.outputs.commit_hash }}"
+          
+          echo "从 commit ${COMMIT_HASH} 恢复自定义文件..."
+          
+          # 恢复 workflow 文件
+          git show "${COMMIT_HASH}:.github/workflows/Upstream&Clean.yml" > .github/workflows/Upstream&Clean.yml || echo "Upstream&Clean.yml 不存在于历史中"
+          git show "${COMMIT_HASH}:.github/workflows/test-clash-api-scripts.yml" > .github/workflows/test-clash-api-scripts.yml || echo "test-clash-api-scripts.yml 不存在于历史中"
+          
+          # 恢复 scripts/clash-api/ 目录
+          if [ -f ".github/workflows/Upstream&Clean.yml" ]; then
+            mkdir -p scripts
+            git archive "${COMMIT_HASH}" -- scripts/clash-api | tar -x -C scripts || echo "scripts/clash-api/ 不存在于历史中"
+          fi
+          
           echo "恢复完成"
           ls -la .github/workflows/
 
@@ -70,7 +76,7 @@ jobs:
           git add .github/workflows/Upstream&Clean.yml .github/workflows/test-clash-api-scripts.yml scripts/clash-api/ || true
           
           if git diff --cached --quiet; then
-            echo "没有文件需要恢复"
+            echo "没有文件需要恢复或文件已存在"
           else
             git commit -m "chore: 恢复自定义 workflow 和脚本
 
